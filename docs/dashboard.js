@@ -162,31 +162,38 @@
 
   let currentMetric = 'views';
   let currentScope = 'all';
+  let currentRange = 60; // 7 | 30 | 60 | 'all'
   let mainChart = null;
 
-  function buildDatasets(metric, scope) {
+  function sliceTail(arr, n) {
+    if (n === 'all' || !Number.isFinite(n)) return arr.slice();
+    return arr.slice(Math.max(0, arr.length - n));
+  }
+
+  function buildDatasets(metric, scope, n) {
     const md = metricData[metric];
     const tools = (scope === 'all') ? TOOL_KEYS : [scope];
     const ctx = document.getElementById('chart-main').getContext('2d');
     return tools.map(t => {
       const color = C[t];
       const label = TOOL_LABEL[t];
+      const data = sliceTail(md[t], n);
       if (md.type === 'bar') {
         return {
-          label, data: md[t], backgroundColor: color, borderRadius: 2,
+          label, data, backgroundColor: color, borderRadius: 2,
           stack: (scope === 'all') ? 's1' : undefined
         };
       }
       if (md.stacked) {
         return {
-          label, data: md[t], borderColor: color,
+          label, data, borderColor: color,
           backgroundColor: fillGradient(ctx, color), fill: true,
           borderWidth: 1.6, pointRadius: 0, tension: 0.3,
           stack: (scope === 'all') ? 's1' : undefined
         };
       }
       return {
-        label, data: md[t], borderColor: color,
+        label, data, borderColor: color,
         backgroundColor: 'transparent', fill: false,
         borderWidth: 1.8, pointRadius: 0, tension: 0.25
       };
@@ -196,9 +203,10 @@
   function renderMain() {
     const md = metricData[currentMetric];
     const stacked = md.stacked && currentScope === 'all';
+    const slicedLabels = sliceTail(labels, currentRange);
     const config = {
       type: md.type,
-      data: { labels, datasets: buildDatasets(currentMetric, currentScope) },
+      data: { labels: slicedLabels, datasets: buildDatasets(currentMetric, currentScope, currentRange) },
       options: {
         maintainAspectRatio: false,
         responsive: true,
@@ -215,8 +223,9 @@
     };
     if (mainChart) mainChart.destroy();
     mainChart = new Chart(document.getElementById('chart-main'), config);
+    const rangeLabel = (currentRange === 'all') ? 'all time' : `last ${currentRange}d`;
     document.getElementById('chart-sub').textContent =
-      `${metricSubtitle[currentMetric]} · ${TOOL_LABEL[currentScope]}`;
+      `${metricSubtitle[currentMetric]} · ${TOOL_LABEL[currentScope]} · ${rangeLabel}`;
   }
 
   document.querySelectorAll('#metric button').forEach(btn => {
@@ -232,6 +241,15 @@
       document.querySelectorAll('#scope button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentScope = btn.dataset.tool;
+      renderMain();
+    });
+  });
+  document.querySelectorAll('#range button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#range button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const r = btn.dataset.r;
+      currentRange = (r === 'all') ? 'all' : parseInt(r, 10);
       renderMain();
     });
   });
