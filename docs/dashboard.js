@@ -192,9 +192,10 @@
           stack: (scope === 'all') ? 's1' : undefined
         };
       }
+      // Non-stacked line (e.g. cumulative stars): same frosted fill, baseline = origin
       return {
         label, data, borderColor: color,
-        backgroundColor: 'transparent', fill: false,
+        backgroundColor: fillGradient(ctx, color), fill: 'origin',
         borderWidth: 1.8, pointRadius: 0, tension: 0.25
       };
     });
