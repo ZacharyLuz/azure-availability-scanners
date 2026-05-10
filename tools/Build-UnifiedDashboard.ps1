@@ -55,17 +55,58 @@ $CsvFiles = @('views.csv', 'clones.csv', 'stars.csv', 'referrers.csv', 'psgaller
 #endregion
 
 #region Helpers
+# In-memory cache so each CSV is fetched at most once per build run.
+$script:CsvCache = @{}
+
 function Get-RawCsv {
     param([string]$Repo, [string]$File)
     # Always emit individual rows to the pipeline; callers wrap with @() to guarantee array shape.
+    $cacheKey = "$Repo/$File"
+    if ($script:CsvCache.ContainsKey($cacheKey)) {
+        # Cached value is already an array; re-emit row-by-row to preserve pipeline behaviour.
+        foreach ($row in $script:CsvCache[$cacheKey]) { $row }
+        return
+    }
     $url = "$RawBase/$Repo/$Branch/data/$File"
     try {
         $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -ErrorAction Stop
-        if (-not $resp.Content -or $resp.Content.Trim() -eq '') { return }
-        $resp.Content | ConvertFrom-Csv
+        if (-not $resp.Content -or $resp.Content.Trim() -eq '') {
+            $script:CsvCache[$cacheKey] = @()
+            return
+        }
+        $rows = @($resp.Content | ConvertFrom-Csv)
+        $script:CsvCache[$cacheKey] = $rows
+        foreach ($row in $rows) { $row }
     } catch {
         Write-Verbose "Could not fetch ${Repo}/${File}: $_"
+        $script:CsvCache[$cacheKey] = @()
     }
+}
+
+function Get-EarliestCsvDate {
+    # Scan every cached row's Date column to find the earliest collected day across all tools/files.
+    # Falls back to $FallbackStart if no parseable dates are found.
+    param([datetime]$FallbackStart)
+    $min = $null
+    foreach ($rows in $script:CsvCache.Values) {
+        foreach ($r in $rows) {
+            if (-not $r.PSObject.Properties['Date'] -or -not $r.Date) { continue }
+            try {
+                $d = ([datetime]$r.Date).Date
+                if ($null -eq $min -or $d -lt $min) { $min = $d }
+            } catch {
+                Write-Verbose "Skipping unparseable date '$($r.Date)'"
+            }
+        }
+    }
+    if ($null -eq $min) { return $FallbackStart }
+    return $min
+}
+
+function Get-LabelsForRange {
+    param([datetime]$Start, [datetime]$End)
+    $days = ($End - $Start).Days + 1
+    return @(0..($days - 1) | ForEach-Object { $Start.AddDays($_).ToString('yyyy-MM-dd') })
 }
 
 function Get-DateRange {
@@ -188,11 +229,27 @@ function Get-LatestReferrers {
 
 #region Fetch all data
 Write-Host "Fetching CSV data from $($Tools.Count) repos..." -ForegroundColor Cyan
-$range = Get-DateRange -Days $WindowDays
-$priorRange = @{ Start = $range.Start.AddDays(-$WindowDays); End = $range.Start.AddDays(-1) }
+
+# The 60-day "current window" still drives the per-tool totals block (used by the static
+# comparison table at the bottom of the page) and family-level deltas. The chart series
+# is now full-history so the JS All toggle has real data to slice through.
+$windowRange = Get-DateRange -Days $WindowDays
+$priorRange = @{ Start = $windowRange.Start.AddDays(-$WindowDays); End = $windowRange.Start.AddDays(-1) }
+
+# Pass 1: warm the CSV cache for every tool/file we care about. After this loop the script
+# can compute the earliest date across all collected data.
+foreach ($t in $Tools) {
+    foreach ($file in $CsvFiles) { @(Get-RawCsv -Repo $t.repo -File $file) | Out-Null }
+}
+
+# Full history range = earliest date in any CSV → today. This is what the JS toggles slice.
+$historyStart = Get-EarliestCsvDate -FallbackStart $windowRange.Start
+$historyEnd   = (Get-Date).Date
+$fullLabels   = Get-LabelsForRange -Start $historyStart -End $historyEnd
+$fullDays     = $fullLabels.Count
 
 $dataset = [ordered]@{
-    labels = $range.Labels
+    labels = $fullLabels
     tools = [ordered]@{}
     totals = [ordered]@{}
     referrers = @()
@@ -203,22 +260,24 @@ $allReferrers = @()
 
 foreach ($t in $Tools) {
     Write-Host "  $($t.repo)..." -NoNewline
-    # Defensive @() wrapping — single-row CSVs would otherwise become a scalar under strict mode
+    # Cached on first call in pass 1; this just re-reads from the in-memory cache.
     $views        = @(Get-RawCsv -Repo $t.repo -File 'views.csv')
     $clones       = @(Get-RawCsv -Repo $t.repo -File 'clones.csv')
     $stars        = @(Get-RawCsv -Repo $t.repo -File 'stars.csv')
     $referrers    = @(Get-RawCsv -Repo $t.repo -File 'referrers.csv')
     $psgallery    = @(Get-RawCsv -Repo $t.repo -File 'psgallery-downloads.csv')
 
-    # Daily series (filled to label range with 0 for missing dates)
-    $viewsSeries  = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $range.Labels
-    $clonesSeries = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $range.Labels
-    $starsSeries  = Get-CumulativeStarsSeries -StarRows $stars -Labels $range.Labels
-    $gallerySeries = Get-PSGallerySeries -Rows $psgallery -Labels $range.Labels
+    # Full-history series — JS slices these for 7d / 30d / 60d / All buttons.
+    $viewsSeries   = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $fullLabels
+    $clonesSeries  = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $fullLabels
+    $starsSeries   = Get-CumulativeStarsSeries -StarRows $stars -Labels $fullLabels
+    $gallerySeries = Get-PSGallerySeries -Rows $psgallery -Labels $fullLabels
 
-    # Window totals (current window)
-    $viewsTotal  = ($viewsSeries  | Measure-Object -Sum).Sum
-    $clonesTotal = ($clonesSeries | Measure-Object -Sum).Sum
+    # 60-day window totals (kept for the static comparison table + backward-compat).
+    $windowViewsSeries  = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $windowRange.Labels
+    $windowClonesSeries = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $windowRange.Labels
+    $viewsTotal  = ($windowViewsSeries  | Measure-Object -Sum).Sum
+    $clonesTotal = ($windowClonesSeries | Measure-Object -Sum).Sum
     $starsTotal  = ($starsSeries  | Select-Object -Last 1)
     if (-not $starsTotal) { $starsTotal = 0 }
     $galleryTotal = ($gallerySeries | Select-Object -Last 1)
@@ -271,7 +330,7 @@ $famGallery = ($Tools | ForEach-Object { $dataset.tools[$_.key].totals.gallery }
 
 $famPriorViews   = 0; $famPriorClones = 0; $famPriorStars = 0; $famPriorGallery = 0
 foreach ($t in $Tools) {
-    # Recompute prior totals from the same data (no caching to keep this script straightforward)
+    # Re-uses cached CSVs from pass 1 (Get-RawCsv hits $script:CsvCache).
     $views     = @(Get-RawCsv -Repo $t.repo -File 'views.csv')
     $clones    = @(Get-RawCsv -Repo $t.repo -File 'clones.csv')
     $stars     = @(Get-RawCsv -Repo $t.repo -File 'stars.csv')
@@ -331,6 +390,6 @@ Set-Content -Path $OutputPath -Value $out -Encoding UTF8 -NoNewline
 
 $sizeKB = [math]::Round((Get-Item $OutputPath).Length / 1KB, 1)
 Write-Host "Wrote $OutputPath ($sizeKB KB)" -ForegroundColor Green
-Write-Host "  Family totals: views=$famViews clones=$famClones stars=$famStars gallery=$famGallery" -ForegroundColor Gray
-Write-Host "  Window: $($range.Start.ToString('yyyy-MM-dd')) to $($range.End.ToString('yyyy-MM-dd')) ($WindowDays days)" -ForegroundColor Gray
+Write-Host "  Family totals (60d window): views=$famViews clones=$famClones stars=$famStars gallery=$famGallery" -ForegroundColor Gray
+Write-Host "  Chart history: $($historyStart.ToString('yyyy-MM-dd')) to $($historyEnd.ToString('yyyy-MM-dd')) ($fullDays days)" -ForegroundColor Gray
 #endregion
