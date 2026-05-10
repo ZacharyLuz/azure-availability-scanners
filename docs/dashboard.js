@@ -140,7 +140,7 @@
     }
   };
   const metricSubtitle = {
-    views:  'Daily unique visitors · GitHub Traffic API',
+    views:  'Daily views · GitHub Traffic API',
     clones: 'Daily git clones · GitHub Traffic API',
     stars:  'Cumulative stargazer growth · all time'
   };

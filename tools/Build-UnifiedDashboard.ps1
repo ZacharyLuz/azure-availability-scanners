@@ -268,14 +268,15 @@ foreach ($t in $Tools) {
     $psgallery    = @(Get-RawCsv -Repo $t.repo -File 'psgallery-downloads.csv')
 
     # Full-history series — JS slices these for 7d / 30d / 60d / All buttons.
-    $viewsSeries   = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $fullLabels
-    $clonesSeries  = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $fullLabels
+    # Use TotalViews/TotalClones (matches the headline number GitHub shows on the Traffic page).
+    $viewsSeries   = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'TotalViews'  -Labels $fullLabels
+    $clonesSeries  = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'TotalClones' -Labels $fullLabels
     $starsSeries   = Get-CumulativeStarsSeries -StarRows $stars -Labels $fullLabels
     $gallerySeries = Get-PSGallerySeries -Rows $psgallery -Labels $fullLabels
 
     # 60-day window totals (kept for the static comparison table + backward-compat).
-    $windowViewsSeries  = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $windowRange.Labels
-    $windowClonesSeries = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $windowRange.Labels
+    $windowViewsSeries  = Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'TotalViews'  -Labels $windowRange.Labels
+    $windowClonesSeries = Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'TotalClones' -Labels $windowRange.Labels
     $viewsTotal  = ($windowViewsSeries  | Measure-Object -Sum).Sum
     $clonesTotal = ($windowClonesSeries | Measure-Object -Sum).Sum
     $starsTotal  = ($starsSeries  | Select-Object -Last 1)
@@ -285,8 +286,8 @@ foreach ($t in $Tools) {
 
     # Prior window totals for deltas
     $priorLabels = 0..($WindowDays - 1) | ForEach-Object { $priorRange.Start.AddDays($_).ToString('yyyy-MM-dd') }
-    $priorViews  = (Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $priorLabels | Measure-Object -Sum).Sum
-    $priorClones = (Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $priorLabels | Measure-Object -Sum).Sum
+    $priorViews  = (Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'TotalViews'  -Labels $priorLabels | Measure-Object -Sum).Sum
+    $priorClones = (Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'TotalClones' -Labels $priorLabels | Measure-Object -Sum).Sum
     $priorStars  = (Get-CumulativeStarsSeries -StarRows $stars -Labels $priorLabels | Select-Object -Last 1)
     if (-not $priorStars) { $priorStars = 0 }
     $priorGallery = (Get-PSGallerySeries -Rows $psgallery -Labels $priorLabels | Select-Object -Last 1)
@@ -336,8 +337,8 @@ foreach ($t in $Tools) {
     $stars     = @(Get-RawCsv -Repo $t.repo -File 'stars.csv')
     $psgallery = @(Get-RawCsv -Repo $t.repo -File 'psgallery-downloads.csv')
     $priorLabels = 0..($WindowDays - 1) | ForEach-Object { $priorRange.Start.AddDays($_).ToString('yyyy-MM-dd') }
-    $famPriorViews  += (Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'UniqueViews'  -Labels $priorLabels | Measure-Object -Sum).Sum
-    $famPriorClones += (Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'UniqueClones' -Labels $priorLabels | Measure-Object -Sum).Sum
+    $famPriorViews  += (Get-DailySeries -Rows $views  -DateField 'Date' -ValueField 'TotalViews'  -Labels $priorLabels | Measure-Object -Sum).Sum
+    $famPriorClones += (Get-DailySeries -Rows $clones -DateField 'Date' -ValueField 'TotalClones' -Labels $priorLabels | Measure-Object -Sum).Sum
     $ps = (Get-CumulativeStarsSeries -StarRows $stars -Labels $priorLabels | Select-Object -Last 1)
     if ($ps) { $famPriorStars += $ps }
     $pg = (Get-PSGallerySeries -Rows $psgallery -Labels $priorLabels | Select-Object -Last 1)
