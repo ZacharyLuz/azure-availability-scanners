@@ -76,27 +76,12 @@
     if (delta < 0) el.classList.add('neg');
   }
 
-  // ── Hero band ─────────────────────────────────────────────────
-  document.getElementById('hero-views').textContent   = fmtNum(DATA.totals.views);
-  document.getElementById('hero-clones').textContent  = fmtNum(DATA.totals.clones);
-  document.getElementById('hero-stars').textContent   = fmtNum(DATA.totals.stars);
-  document.getElementById('hero-gallery').textContent = fmtNum(DATA.totals.gallery);
-  setDelta('hero-views-delta', DATA.totals.viewsDeltaPct, ' vs prior 60d');
-  setDelta('hero-clones-delta', DATA.totals.clonesDeltaPct, ' vs prior 60d');
-  setAbsDelta('hero-stars-delta', DATA.totals.starsDelta, 'new');
-  setDelta('hero-gallery-delta', DATA.totals.galleryDeltaPct, ' vs prior 60d');
-
-  // ── Per-tool cards ───────────────────────────────────────────
+  // ── Per-tool versions (range-independent, set once) ──────────
   TOOL_KEYS.forEach(t => {
     const tool = DATA.tools[t];
     if (!tool) return;
-    document.getElementById(`tool-${t}-version`).textContent = tool.version || '—';
-    document.getElementById(`tool-${t}-views`).textContent   = fmtNum(tool.totals.views);
-    document.getElementById(`tool-${t}-clones`).textContent  = fmtNum(tool.totals.clones);
-    document.getElementById(`tool-${t}-stars`).textContent   = fmtNum(tool.totals.stars);
-    setDelta(`tool-${t}-views-delta`, tool.totals.viewsDeltaPct);
-    setDelta(`tool-${t}-clones-delta`, tool.totals.clonesDeltaPct);
-    setAbsDelta(`tool-${t}-stars-delta`, tool.totals.starsDelta);
+    const vEl = document.getElementById(`tool-${t}-version`);
+    if (vEl) vEl.textContent = tool.version || '—';
   });
 
   // ── Sparklines ───────────────────────────────────────────────
@@ -165,9 +150,95 @@
   let currentRange = 60; // 7 | 30 | 60 | 'all'
   let mainChart = null;
 
+  // ── MASTER toggle helpers — every number metric is windowed by currentRange ─
+  function rangeToN(r) {
+    if (r === 'all' || !Number.isFinite(parseInt(r, 10))) return labels.length;
+    return Math.min(parseInt(r, 10), labels.length);
+  }
+  function rangeLabel(r) { return (r === 'all') ? 'all time' : `last ${r}d`; }
+  function priorLabel(r) { return (r === 'all') ? '' : ` vs prior ${r}d`; }
+
   function sliceTail(arr, n) {
     if (n === 'all' || !Number.isFinite(n)) return arr.slice();
     return arr.slice(Math.max(0, arr.length - n));
+  }
+  function sumTail(arr, n) {
+    return arr.slice(-n).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  }
+  function lastTail(arr, n) {
+    const tail = arr.slice(-n);
+    return tail.length ? tail[tail.length - 1] : 0;
+  }
+  // Prior-window sum for additive metrics; returns null when no prior data exists
+  function priorWindowSum(arr, n) {
+    if (n >= arr.length) return null;
+    const end = arr.length - n;
+    const start = Math.max(0, end - n);
+    return arr.slice(start, end).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  }
+  // Value at the day immediately before the window for cumulative metrics; null when none
+  function valueBeforeWindow(arr, n) {
+    const idx = arr.length - n - 1;
+    return idx >= 0 ? arr[idx] : null;
+  }
+
+  // Recompute hero band + per-tool card numbers for the active range.
+  // Called on init and on every #range button click via renderMain().
+  function recomputeStats(range) {
+    const n = rangeToN(range);
+    let famViews = 0, famClones = 0, famStars = 0, famGallery = 0;
+    let famPriorViews = 0, famPriorClones = 0;
+    let famPriorViewsHas = false, famPriorClonesHas = false;
+    let famPriorStars = 0, famPriorGallery = 0;
+    let famPriorStarsHas = false, famPriorGalleryHas = false;
+
+    TOOL_KEYS.forEach(t => {
+      const s = DATA.tools[t].series;
+      const v  = sumTail(s.views, n);
+      const c  = sumTail(s.clones, n);
+      const st = lastTail(s.stars, n);
+      const g  = lastTail(s.gallery, n);
+      famViews += v; famClones += c; famStars += st; famGallery += g;
+
+      const pv = priorWindowSum(s.views, n);
+      const pc = priorWindowSum(s.clones, n);
+      const ps = valueBeforeWindow(s.stars, n);
+      const pg = valueBeforeWindow(s.gallery, n);
+      if (pv !== null) { famPriorViews  += pv; famPriorViewsHas  = true; }
+      if (pc !== null) { famPriorClones += pc; famPriorClonesHas = true; }
+      if (ps !== null) { famPriorStars  += ps; famPriorStarsHas  = true; }
+      if (pg !== null) { famPriorGallery += pg; famPriorGalleryHas = true; }
+
+      // Per-tool card numbers + deltas
+      document.getElementById(`tool-${t}-views`).textContent  = fmtNum(v);
+      document.getElementById(`tool-${t}-clones`).textContent = fmtNum(c);
+      document.getElementById(`tool-${t}-stars`).textContent  = fmtNum(st);
+      setDelta(`tool-${t}-views-delta`,  pv === null ? null : pctDelta(v, pv));
+      setDelta(`tool-${t}-clones-delta`, pc === null ? null : pctDelta(c, pc));
+      setAbsDelta(`tool-${t}-stars-delta`, ps === null ? null : (st - ps), 'new');
+    });
+
+    // Hero band
+    document.getElementById('hero-views').textContent   = fmtNum(famViews);
+    document.getElementById('hero-clones').textContent  = fmtNum(famClones);
+    document.getElementById('hero-stars').textContent   = fmtNum(famStars);
+    document.getElementById('hero-gallery').textContent = fmtNum(famGallery);
+
+    setDelta('hero-views-delta',
+      famPriorViewsHas ? pctDelta(famViews, famPriorViews) : null,
+      priorLabel(range));
+    setDelta('hero-clones-delta',
+      famPriorClonesHas ? pctDelta(famClones, famPriorClones) : null,
+      priorLabel(range));
+    setAbsDelta('hero-stars-delta',
+      famPriorStarsHas ? (famStars - famPriorStars) : null,
+      'new');
+    setDelta('hero-gallery-delta',
+      famPriorGalleryHas ? pctDelta(famGallery, famPriorGallery) : null,
+      priorLabel(range));
+
+    const rl = document.getElementById('hero-range-label');
+    if (rl) rl.textContent = rangeLabel(range);
   }
 
   function buildDatasets(metric, scope, n) {
@@ -224,9 +295,9 @@
     };
     if (mainChart) mainChart.destroy();
     mainChart = new Chart(document.getElementById('chart-main'), config);
-    const rangeLabel = (currentRange === 'all') ? 'all time' : `last ${currentRange}d`;
     document.getElementById('chart-sub').textContent =
-      `${metricSubtitle[currentMetric]} · ${TOOL_LABEL[currentScope]} · ${rangeLabel}`;
+      `${metricSubtitle[currentMetric]} · ${TOOL_LABEL[currentScope]} · ${rangeLabel(currentRange)}`;
+    recomputeStats(currentRange);
   }
 
   document.querySelectorAll('#metric button').forEach(btn => {
