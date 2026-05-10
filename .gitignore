@@ -1,0 +1,12 @@
+# PowerShell artifacts
+*.psproj
+*.psproj.user
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local debug output
+artifacts/
+*.log

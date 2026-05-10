@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Azure Availability Scanners — Family Dashboard</title>
+<meta name="description" content="Combined GitHub traffic and PSGallery installs for Get-AzVMAvailability, Get-AzAIModelAvailability, and Get-AzPaaSAvailability.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#06080d; --panel:rgba(20,24,32,0.55); --panel-strong:rgba(28,34,46,0.85);
+  --border:rgba(148,163,184,0.14); --border-strong:rgba(148,163,184,0.24);
+  --text:#e6ebf2; --text-dim:#94a3b8; --text-muted:#64748b;
+  --vm:#3b82f6; --ai:#a855f7; --paas:#10b981;
+  --vm-soft:rgba(59,130,246,0.12); --ai-soft:rgba(168,85,247,0.12); --paas-soft:rgba(16,185,129,0.12);
+  --good:#10b981; --warn:#f59e0b; --bad:#ef4444;
+  --pad-x: clamp(20px, 3vw, 56px);
+  --gap: clamp(14px, 1.4vw, 22px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background: radial-gradient(1200px 700px at 10% -10%, rgba(59,130,246,0.18), transparent 60%),
+              radial-gradient(1000px 600px at 110% 0%, rgba(168,85,247,0.16), transparent 55%),
+              radial-gradient(900px 500px at 50% 110%, rgba(16,185,129,0.12), transparent 55%),
+              var(--bg);
+  color:var(--text);
+  font-family:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:14px; line-height:1.5; min-height:100vh;
+}
+a{color:var(--vm); text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.88em; background:rgba(148,163,184,0.1); padding:1px 6px; border-radius:4px}
+
+/* ── Topbar (full width) ── */
+.topbar{position:sticky; top:0; z-index:50; background:rgba(6,8,13,0.7); backdrop-filter:blur(18px); border-bottom:1px solid var(--border)}
+.topbar-inner{display:flex; align-items:center; gap:18px; padding:14px var(--pad-x)}
+.brand{display:flex; align-items:center; gap:12px; min-width:0}
+.brand-mark{width:36px; height:36px; border-radius:9px; background:linear-gradient(135deg,var(--vm) 0%,var(--ai) 50%,var(--paas) 100%); display:grid; place-items:center; color:#fff; font-weight:800; font-size:15px; flex-shrink:0; box-shadow:0 4px 12px rgba(59,130,246,0.3)}
+.brand-text{display:flex; flex-direction:column; min-width:0}
+.brand-name{font-size:14px; font-weight:700; letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.brand-sub{font-size:11px; color:var(--text-dim); margin-top:1px}
+.spacer{flex:1}
+.badge{display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.28); color:var(--warn); font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase}
+.last-update{color:var(--text-dim); font-size:12px; white-space:nowrap}
+.last-update strong{color:var(--text)}
+
+/* ── Page (full width) ── */
+.page{padding: 22px var(--pad-x) 80px}
+
+/* ── Cards / layout primitives ── */
+.card{background:var(--panel); backdrop-filter:blur(14px); border:1px solid var(--border); border-radius:14px; padding:18px 20px; transition:border-color 160ms ease, transform 160ms ease}
+.card:hover{border-color:var(--border-strong)}
+.wide.card{margin-top:var(--gap)}
+.card-head{display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:14px; flex-wrap:wrap}
+.card-title{font-size:14px; font-weight:600; margin:0}
+.card-sub{font-size:12px; color:var(--text-dim); margin-top:3px}
+.row{display:grid; grid-template-columns:repeat(auto-fit, minmax(440px, 1fr)); gap:var(--gap); margin-top:var(--gap)}
+
+/* ── Hero band: family-wide totals ── */
+.hero{display:grid; grid-template-columns: minmax(220px, 1.2fr) repeat(4, minmax(140px, 1fr)); gap:var(--gap); align-items:center; padding:22px 24px; background:linear-gradient(135deg, rgba(59,130,246,0.06), rgba(168,85,247,0.04) 50%, rgba(16,185,129,0.06)); border:1px solid var(--border-strong); border-radius:16px}
+.hero-label{font-size:10px; font-weight:700; letter-spacing:0.14em; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px}
+.hero-headline{font-size:22px; font-weight:800; letter-spacing:-0.02em; margin:0}
+.hero-sub{font-size:12px; color:var(--text-dim); margin-top:4px; max-width:320px}
+.hero-stat{display:flex; flex-direction:column; gap:4px}
+.hero-stat-label{font-size:10px; font-weight:700; letter-spacing:0.12em; color:var(--text-dim); text-transform:uppercase}
+.hero-stat-value{font-size:24px; font-weight:800; letter-spacing:-0.01em; color:var(--text)}
+.hero-stat-delta{font-size:11px; color:var(--good); display:inline-flex; align-items:center; gap:3px}
+.hero-stat-delta.neg{color:var(--bad)}
+.hero-stat-delta.flat{color:var(--text-dim)}
+
+/* ── Per-tool cards ── */
+.tools{display:grid; grid-template-columns:repeat(3, minmax(280px, 1fr)); gap:var(--gap); margin-top:var(--gap)}
+.tool{position:relative; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px 20px 8px; overflow:hidden}
+.tool::before{content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--accent, var(--vm))}
+.tool.vm{--accent:var(--vm)}
+.tool.ai{--accent:var(--ai)}
+.tool.paas{--accent:var(--paas)}
+.tool-head{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:14px}
+.tool-name{font-size:15px; font-weight:700; letter-spacing:-0.01em; margin:0}
+.tool-name .dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:8px; vertical-align:middle}
+.tool-tag{font-size:11px; color:var(--text-dim)}
+.tool-version{font-size:10px; font-weight:700; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,0.04); border:1px solid var(--border); color:var(--text-dim)}
+.tool-stats{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:12px}
+.tool-stat{padding:10px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:9px}
+.tool-stat-label{font-size:9px; font-weight:700; letter-spacing:0.1em; color:var(--text-dim); text-transform:uppercase}
+.tool-stat-value{font-size:18px; font-weight:700; margin-top:3px}
+.tool-stat-delta{font-size:10px; color:var(--good); margin-top:2px}
+.tool-stat-delta.flat{color:var(--text-dim)}
+.tool-stat-delta.neg{color:var(--bad)}
+.spark-h{height:60px; margin:0 -2px}
+
+/* ── Chart cards ── */
+.chart-h{height:280px; margin-top:6px}
+.legend{display:flex; gap:14px; flex-wrap:wrap; align-items:center}
+.legend span{display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim)}
+.legend i{display:inline-block; width:10px; height:10px; border-radius:2px}
+
+/* ── Tables ── */
+.table{width:100%; border-collapse:collapse; font-size:12.5px}
+.table th{text-align:left; font-weight:600; color:var(--text-dim); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; padding:9px 12px; border-bottom:1px solid var(--border-strong)}
+.table td{padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle}
+.table tbody tr:last-child td{border-bottom:none}
+.bar{display:inline-block; width:130px; height:7px; background:rgba(148,163,184,0.12); border-radius:999px; overflow:hidden; vertical-align:middle; margin-right:9px}
+.bar span{display:block; height:100%; border-radius:999px}
+.pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:0.04em}
+.pill.vm{background:var(--vm-soft); color:var(--vm)}
+.pill.ai{background:var(--ai-soft); color:var(--ai)}
+.pill.paas{background:var(--paas-soft); color:var(--paas)}
+.pill.fam{background:linear-gradient(135deg, var(--vm-soft), var(--paas-soft)); color:var(--text)}
+
+/* ── Toggles / pills ── */
+.switch, .toolpills{display:inline-flex; gap:2px; padding:3px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:9px}
+.switch button, .toolpills button{appearance:none; background:transparent; border:0; color:var(--text-dim); padding:6px 12px; border-radius:7px; font-size:12px; font-weight:600; font-family:inherit; cursor:pointer; transition:all 160ms ease; display:inline-flex; align-items:center; gap:6px}
+.switch button:hover, .toolpills button:hover{color:var(--text)}
+.switch button.active, .toolpills button.active{background:rgba(255,255,255,0.08); color:var(--text); box-shadow:0 1px 0 rgba(255,255,255,0.04) inset}
+.switch button .pip, .toolpills button .pip{width:6px; height:6px; border-radius:50%; background:currentColor; opacity:0.5}
+.switch button.active .pip, .toolpills button.active .pip{opacity:1}
+.toolpills button[data-tool="vm"].active .pip{background:var(--vm); opacity:1}
+.toolpills button[data-tool="ai"].active .pip{background:var(--ai); opacity:1}
+.toolpills button[data-tool="paas"].active .pip{background:var(--paas); opacity:1}
+
+/* ── Footer ── */
+.foot{margin-top:34px; padding-top:18px; border-top:1px solid var(--border); color:var(--text-dim); font-size:11.5px; text-align:center}
+.foot a{color:var(--text-dim); text-decoration:underline; text-underline-offset:2px}
+
+@media (max-width: 900px){
+  .tools{grid-template-columns:1fr}
+  .row{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr 1fr}
+  .hero-stat:nth-child(n+4){border-top:1px solid var(--border); padding-top:14px}
+}
+</style>
+</head>
+<body>
+
+<!-- ── Topbar ── -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div class="brand-text">
+        <div class="brand-name">Azure Availability Scanners</div>
+        <div class="brand-sub">Family dashboard · single pane of glass</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="last-update">Last updated <strong>2026-05-10 02:21 UTC</strong></div>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- ── Intro ── -->
+  <p style="max-width:780px; color:var(--text-dim); margin:6px 0 18px">
+    Aggregates GitHub views, clones, stars, referrers, and PSGallery downloads from
+    <a href="https://github.com/zacharyluz/Get-AzVMAvailability" target="_blank">Get-AzVMAvailability</a>,
+    <a href="https://github.com/zacharyluz/Get-AzAIModelAvailability" target="_blank">Get-AzAIModelAvailability</a>, and
+    <a href="https://github.com/zacharyluz/Get-AzPaaSAvailability" target="_blank">Get-AzPaaSAvailability</a>.
+    Data is fetched from each repo's <code>traffic-data</code> branch and refreshed twice daily.
+  </p>
+
+  <!-- ── Hero band: family totals ── -->
+  <div class="hero">
+    <div>
+      <div class="hero-label">Family total · last 60 days</div>
+      <h1 class="hero-headline">3 tools · 1 lens</h1>
+      <div class="hero-sub">Combined unique visitors, clones, stars, and gallery installs</div>
+    </div>
+    <div class="hero-stat"><div class="hero-stat-label">Views</div><div class="hero-stat-value" id="hero-views">—</div><div class="hero-stat-delta" id="hero-views-delta">—</div></div>
+    <div class="hero-stat"><div class="hero-stat-label">Clones</div><div class="hero-stat-value" id="hero-clones">—</div><div class="hero-stat-delta" id="hero-clones-delta">—</div></div>
+    <div class="hero-stat"><div class="hero-stat-label">Stars (cumulative)</div><div class="hero-stat-value" id="hero-stars">—</div><div class="hero-stat-delta" id="hero-stars-delta">—</div></div>
+    <div class="hero-stat"><div class="hero-stat-label">PSGallery installs</div><div class="hero-stat-value" id="hero-gallery">—</div><div class="hero-stat-delta" id="hero-gallery-delta">—</div></div>
+  </div>
+
+  <!-- ── Per-tool cards ── -->
+  <div class="tools">
+    <div class="tool vm">
+      <div class="tool-head">
+        <div>
+          <h3 class="tool-name"><span class="dot"></span>Get-AzVMAvailability</h3>
+          <div class="tool-tag">VM SKUs · IaaS compute</div>
+        </div>
+        <span class="tool-version" id="tool-vm-version">—</span>
+      </div>
+      <div class="tool-stats">
+        <div class="tool-stat"><div class="tool-stat-label">Views</div><div class="tool-stat-value" id="tool-vm-views">—</div><div class="tool-stat-delta" id="tool-vm-views-delta">—</div></div>
+        <div class="tool-stat"><div class="tool-stat-label">Clones</div><div class="tool-stat-value" id="tool-vm-clones">—</div><div class="tool-stat-delta" id="tool-vm-clones-delta">—</div></div>
+        <div class="tool-stat"><div class="tool-stat-label">Stars</div><div class="tool-stat-value" id="tool-vm-stars">—</div><div class="tool-stat-delta" id="tool-vm-stars-delta">—</div></div>
+      </div>
+      <div class="spark-h"><canvas id="spark-vm"></canvas></div>
+    </div>
+
+    <div class="tool ai">
+      <div class="tool-head">
+        <div>
+          <h3 class="tool-name"><span class="dot"></span>Get-AzAIModelAvailability</h3>
+          <div class="tool-tag">AI models · Cognitive Services</div>
+        </div>
+        <span class="tool-version" id="tool-ai-version">—</span>
+      </div>
+      <div class="tool-stats">
+        <div class="tool-stat"><div class="tool-stat-label">Views</div><div class="tool-stat-value" id="tool-ai-views">—</div><div class="tool-stat-delta" id="tool-ai-views-delta">—</div></div>
+        <div class="tool-stat"><div class="tool-stat-label">Clones</div><div class="tool-stat-value" id="tool-ai-clones">—</div><div class="tool-stat-delta" id="tool-ai-clones-delta">—</div></div>
+        <div class="tool-stat"><div class="tool-stat-label">Stars</div><div class="tool-stat-value" id="tool-ai-stars">—</div><div class="tool-stat-delta" id="tool-ai-stars-delta">—</div></div>
+      </div>
+      <div class="spark-h"><canvas id="spark-ai"></canvas></div>
+    </div>
+
+    <div class="tool paas">
+      <div class="tool-head">
+        <div>
+          <h3 class="tool-name"><span class="dot"></span>Get-AzPaaSAvailability</h3>
+          <div class="tool-tag">PaaS services</div>
+        </div>
+        <span class="tool-version" id="tool-paas-version">—</span>
+      </div>
+      <div class="tool-stats">
+        <div class="tool-stat"><div class="tool-stat-label">Views</div><div class="tool-stat-value" id="tool-paas-views">—</div><div class="tool-stat-delta" id="tool-paas-views-delta">—</div></div>
+        <div class="tool-stat"><div class="tool-stat-label">Clones</div><div class="tool-stat-value" id="tool-paas-clones">—</div><div class="tool-stat-delta" id="tool-paas-clones-delta">—</div></div>
+        <div class="tool-stat"><div class="tool-stat-label">Stars</div><div class="tool-stat-value" id="tool-paas-stars">—</div><div class="tool-stat-delta" id="tool-paas-stars-delta">—</div></div>
+      </div>
+      <div class="spark-h"><canvas id="spark-paas"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Unified chart card with metric + scope toggles ── -->
+  <div class="wide card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">GitHub trends — pick a metric and scope</div>
+        <div class="card-sub" id="chart-sub">Daily unique visitors · stacked across all 3 tools</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="switch" id="metric">
+          <button data-m="views" class="active"><span class="pip"></span>Views</button>
+          <button data-m="clones"><span class="pip"></span>Clones</button>
+          <button data-m="stars"><span class="pip"></span>Stars (cum.)</button>
+        </div>
+        <div class="toolpills" id="scope">
+          <button data-tool="all" class="active"><span class="pip"></span>All 3</button>
+          <button data-tool="vm"><span class="pip"></span>VM</button>
+          <button data-tool="ai"><span class="pip"></span>AI</button>
+          <button data-tool="paas"><span class="pip"></span>PaaS</button>
+        </div>
+      </div>
+    </div>
+    <div class="chart-h"><canvas id="chart-main"></canvas></div>
+  </div>
+
+  <!-- ── Standalone PSGallery card (always visible) ── -->
+  <div class="wide card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">PSGallery installs — cumulative per tool</div>
+        <div class="card-sub">Daily snapshot of latest version · powershellgallery.com</div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--vm)"></i>AzVMAvailability</span>
+        <span><i style="background:var(--ai)"></i>Get-AzAIModelAvailability</span>
+        <span><i style="background:var(--paas)"></i>Get-AzPaaSAvailability</span>
+      </div>
+    </div>
+    <div class="chart-h"><canvas id="chart-gallery"></canvas></div>
+  </div>
+
+  <!-- ── Two-up: Referrers + Tool comparison ── -->
+  <div class="row">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Top referrers — combined</div>
+          <div class="card-sub">Sources driving visits across all 3 tools (latest snapshot)</div>
+        </div>
+      </div>
+      <table class="table" id="referrers-table">
+        <thead><tr><th>Referrer</th><th>Tool</th><th style="text-align:right">Visitors</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Tool comparison</div>
+          <div class="card-sub">Last 60 days · sorted by views</div>
+        </div>
+      </div>
+      <table class="table" id="comparison-table">
+        <thead><tr><th>Tool</th><th style="text-align:right">Views</th><th style="text-align:right">Clones</th><th style="text-align:right">★ Total</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="foot">
+    Built from each repo's <code>traffic-data</code> branch · refreshed twice daily and on every star/fork ·
+    <a href="https://github.com/zacharyluz/azure-availability-scanners">source</a>
+  </div>
+</main>
+
+<script>
+// ── Data injected by Build-UnifiedDashboard.ps1 ──────────────────
+const DATA = /*__DATA__*/{"labels":["2026-03-11","2026-03-12","2026-03-13","2026-03-14","2026-03-15","2026-03-16","2026-03-17","2026-03-18","2026-03-19","2026-03-20","2026-03-21","2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29","2026-03-30","2026-03-31","2026-04-01","2026-04-02","2026-04-03","2026-04-04","2026-04-05","2026-04-06","2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-11","2026-04-12","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-18","2026-04-19","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-25","2026-04-26","2026-04-27","2026-04-28","2026-04-29","2026-04-30","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-05-07","2026-05-08","2026-05-09"],"tools":{"vm":{"repo":"Get-AzVMAvailability","package":"AzVMAvailability","version":"2.2.2","series":{"views":[22,11,23,4,4,12,14,9,6,15,2,1,4,4,6,18,52,2,4,10,10,35,14,14,6,5,52,24,34,26,16,4,1,19,13,21,27,19,0,2,18,15,18,14,9,2,3,9,6,8,8,12,1,2,5,16,9,16,12,0],"clones":[4,112,23,13,1,35,65,63,83,73,121,10,9,6,8,35,47,13,14,4,114,147,6,5,8,62,28,5,25,13,12,175,15,47,105,124,50,14,15,20,21,13,106,90,46,75,15,9,18,20,57,71,21,15,28,17,29,13,60,0],"stars":[3,3,4,4,4,4,5,5,6,6,6,6,6,6,6,7,9,9,9,9,9,9,9,9,9,9,10,10,10,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,11,12,12,12,12,12,12],"gallery":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,11,11,19,21,23,26,26,27,27,30,39,40,41,41,41,42,43,43,43,48,49,52,58,59,62,65,68]},"totals":{"views":748.0,"clones":2453.0,"stars":12,"gallery":68,"viewsDeltaPct":315.56,"clonesDeltaPct":957.33,"starsDelta":9,"galleryDeltaPct":null}},"ai":{"repo":"Get-AzAIModelAvailability","package":"Get-AzAIModelAvailability","version":"n/a","series":{"views":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,2,0,1,2,2,0,1,1,1,0,0,0,0,1,12,4,1,0,0,0,3,2,3,0,1,1,2,1,4,2,0,0,0,0,1,0,2,2,0],"clones":[0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,1,0,0,2,0,0,1,33,24,2,6,3,16,7,15,2,7,5,28,1,3,4,1,1,21,23,10,52,12,14,18,10,11,32,14,12,7,14,6,11,15,0],"stars":[0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"gallery":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"totals":{"views":53.0,"clones":447.0,"stars":1,"gallery":0,"viewsDeltaPct":null,"clonesDeltaPct":null,"starsDelta":1,"galleryDeltaPct":null}},"paas":{"repo":"Get-AzPaaSAvailability","package":"Get-AzPaaSAvailability","version":"n/a","series":{"views":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,4,1,0,2,0,1,0,0,2,0,0,1,0,5,4,2,0,6,5,4,4,2,1,1,1,1,3,3,4,1,0,0,0,0,0,3,2,0],"clones":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,53,10,0,3,36,9,3,5,11,8,16,19,13,11,10,30,3,1,2,3,3,26,22,8,44,13,14,16,9,37,39,10,17,13,14,8,11,14,0],"stars":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"gallery":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"totals":{"views":66.0,"clones":564.0,"stars":0,"gallery":0,"viewsDeltaPct":null,"clonesDeltaPct":null,"starsDelta":0,"galleryDeltaPct":null}}},"totals":{"views":867.0,"clones":3464.0,"stars":13.0,"gallery":68.0,"viewsDeltaPct":381.67,"clonesDeltaPct":1393.1,"starsDelta":10.0,"galleryDeltaPct":null},"referrers":[{"referrer":"github.com","tool":"all","visitors":18.0},{"referrer":"teams.public.onecdn.static.microsoft","tool":"all","visitors":16.0},{"referrer":"statics.teams.cdn.office.net","tool":"all","visitors":15.0},{"referrer":"Bing","tool":"all","visitors":5.0},{"referrer":"powershellgallery.com","tool":"vm","visitors":1.0}],"generatedAt":"2026-05-10T02:21:53Z"}/*__END__*/;
+</script>
+<script src="dashboard.js"></script>
+</body>
+</html>

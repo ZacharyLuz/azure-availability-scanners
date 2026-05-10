@@ -1,0 +1,45 @@
+name: Build Unified Dashboard
+
+on:
+  schedule:
+    # Offset by 30 min from source repos so their CDN cache is warm
+    - cron: '30 0,12 * * *'
+  repository_dispatch:
+    # Triggered by source repos after they push fresh CSVs to traffic-data
+    types: [traffic-updated]
+  workflow_dispatch:
+
+# Prevent concurrent runs from racing on git push to main.
+concurrency:
+  group: build-unified-dashboard
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Build dashboard
+        shell: pwsh
+        run: |
+          ./tools/Build-UnifiedDashboard.ps1
+
+      - name: Commit + push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          if git diff --staged --quiet; then
+            echo "No dashboard changes."
+          else
+            ts=$(date -u '+%Y-%m-%d %H:%M UTC')
+            git commit -m "chore(dashboard): rebuild ${ts} [skip ci]"
+            git push origin main
+          fi
